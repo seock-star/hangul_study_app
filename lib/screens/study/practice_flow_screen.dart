@@ -13,15 +13,13 @@ class PracticeFlowScreen extends StatefulWidget {
 }
 
 class _PracticeFlowScreenState extends State<PracticeFlowScreen> {
-  int step = 1; // 1: 듣기, 2: 따라쓰기, 3: 발음하기
-  
+  int step = 1;
   final FlutterTts flutterTts = FlutterTts();
   final SignatureController _signatureController = SignatureController(
     penStrokeWidth: 15,
     penColor: Colors.black,
     exportBackgroundColor: Colors.white,
   );
-  
   final stt.SpeechToText _speechToText = stt.SpeechToText();
   bool _isListening = false;
   String _spokenText = "버튼을 누르고 말해보세요!";
@@ -36,7 +34,7 @@ class _PracticeFlowScreenState extends State<PracticeFlowScreen> {
 
   void _initTts() async {
     await flutterTts.setLanguage("ko-KR");
-    await flutterTts.setSpeechRate(0.35); // 어르신용 느린 속도
+    await flutterTts.setSpeechRate(0.35);
     _speakInstruction(1);
   }
 
@@ -44,7 +42,7 @@ class _PracticeFlowScreenState extends State<PracticeFlowScreen> {
     if (currentStep == 1) {
       await flutterTts.speak('글자를 보고 소리를 들어보세요.');
     } else if (currentStep == 2) {
-      await flutterTts.speak('아래 빈칸에 직접, ${widget.letter}, 글자를 써보세요.'); 
+      await flutterTts.speak('아래 빈칸에 직접, ${widget.letter}, 글자를 써보세요.');
     } else if (currentStep == 3) {
       await flutterTts.speak('마이크 버튼을 누르고, ${widget.sound}, 라고 또박또박 말해보세요!');
     }
@@ -54,13 +52,11 @@ class _PracticeFlowScreenState extends State<PracticeFlowScreen> {
     await _speechToText.initialize();
   }
 
-  void _speakLetter() {
-    flutterTts.speak(widget.sound);
-  }
+  void _speakLetter() => flutterTts.speak(widget.sound);
 
   void _listenToVoice() async {
     if (!_isListening) {
-      bool available = await _speechToText.initialize();
+      final available = await _speechToText.initialize();
       if (available) {
         setState(() => _isListening = true);
         _speechToText.listen(
@@ -84,11 +80,7 @@ class _PracticeFlowScreenState extends State<PracticeFlowScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: Text('${widget.letter} 학습하기'),
-        backgroundColor: Colors.blue[400],
-        foregroundColor: Colors.white,
-      ),
+      appBar: AppBar(title: Text('${widget.letter} 학습하기'), backgroundColor: Colors.blue[400]),
       body: Padding(
         padding: const EdgeInsets.all(20.0),
         child: Column(
@@ -118,12 +110,9 @@ class _PracticeFlowScreenState extends State<PracticeFlowScreen> {
               const SizedBox(height: 20),
               ElevatedButton(
                 style: ElevatedButton.styleFrom(backgroundColor: Colors.green, foregroundColor: Colors.white, padding: const EdgeInsets.all(20), textStyle: const TextStyle(fontSize: 24)),
-                onPressed: () { 
-                  setState(() { step = 2; }); 
-                  _speakInstruction(2);
-                },
+                onPressed: () { setState(() => step = 2); _speakInstruction(2); },
                 child: const Text('다음으로 👉'),
-              )
+              ),
             ],
 
             if (step == 2) ...[
@@ -138,20 +127,18 @@ class _PracticeFlowScreenState extends State<PracticeFlowScreen> {
                 mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                 children: [
                   ElevatedButton.icon(
-                    icon: const Icon(Icons.refresh), label: const Text('지우기'),
+                    icon: const Icon(Icons.refresh),
+                    label: const Text('지우기'),
                     style: ElevatedButton.styleFrom(padding: const EdgeInsets.all(15), textStyle: const TextStyle(fontSize: 20)),
                     onPressed: () => _signatureController.clear(),
                   ),
                   ElevatedButton(
                     style: ElevatedButton.styleFrom(backgroundColor: Colors.green, foregroundColor: Colors.white, padding: const EdgeInsets.all(15), textStyle: const TextStyle(fontSize: 20)),
-                    onPressed: () { 
-                      setState(() { step = 3; }); 
-                      _speakInstruction(3);
-                    },
+                    onPressed: () { setState(() => step = 3); _speakInstruction(3); },
                     child: const Text('다음으로 👉'),
                   ),
                 ],
-              )
+              ),
             ],
 
             if (step == 3) ...[
@@ -171,14 +158,12 @@ class _PracticeFlowScreenState extends State<PracticeFlowScreen> {
                 const SizedBox(height: 20),
                 ElevatedButton(
                   style: ElevatedButton.styleFrom(backgroundColor: Colors.orange, foregroundColor: Colors.white, padding: const EdgeInsets.all(20), textStyle: const TextStyle(fontSize: 24)),
-                  onPressed: () {
-                    Navigator.pop(context); 
-                  },
+                  onPressed: () => Navigator.pop(context),
                   child: const Text('완료하고 돌아가기 🏠'),
-                )
+                ),
               ] else if (!_isListening && _spokenText != "버튼을 누르고 말해보세요!") ...[
                 const Text('다시 한번 천천히 말해볼까요? 🤔', style: TextStyle(fontSize: 20, color: Colors.red), textAlign: TextAlign.center),
-              ]
+              ],
             ],
           ],
         ),

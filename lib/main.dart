@@ -1,22 +1,33 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_local_notifications/flutter_local_notifications.dart';
-import 'dart:math';
+import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter_tts/flutter_tts.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:math';
 
-// 우리가 새로 만들 파일들을 미리 연결해 둡니다.
-import 'home_screen.dart';
+import 'package:flutter_application_1/screens/plant_screen.dart';
+import 'package:flutter_application_1/screens/study/study_menu_screen.dart';
+import 'package:flutter_application_1/screens/practice/practice_menu_screen.dart';
 
-// 앱 전체에서 알림 도구를 쓸 수 있게 전역 변수로 선언합니다.
-final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin = FlutterLocalNotificationsPlugin();
+final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
+    FlutterLocalNotificationsPlugin();
+
+// ── 앱 전체에서 글씨 크기 배율을 공유하는 ValueNotifier ──
+final ValueNotifier<double> fontScaleNotifier = ValueNotifier<double>(1.0);
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  
-  // 안드로이드 기본 앱 아이콘을 알림 아이콘으로 설정
-  const AndroidInitializationSettings initializationSettingsAndroid = AndroidInitializationSettings('@mipmap/ic_launcher');
-  const InitializationSettings initializationSettings = InitializationSettings(android: initializationSettingsAndroid);
-  
-  await flutterLocalNotificationsPlugin.initialize(settings: initializationSettings);
+
+  // 저장된 글씨 크기 불러오기
+  final prefs = await SharedPreferences.getInstance();
+  fontScaleNotifier.value = prefs.getDouble('fontScale') ?? 1.0;
+
+  const AndroidInitializationSettings initializationSettingsAndroid =
+      AndroidInitializationSettings('@mipmap/ic_launcher');
+  const InitializationSettings initializationSettings =
+      InitializationSettings(android: initializationSettingsAndroid);
+  await flutterLocalNotificationsPlugin.initialize(
+      settings: initializationSettings);
 
   runApp(const HangulApp());
 }
@@ -26,89 +37,507 @@ class HangulApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      debugShowCheckedModeBanner: false,
-      title: '기초 한글 공부',
-      theme: ThemeData(
-        primarySwatch: Colors.green,
-      ),
-      // 앱을 켜면 무조건 입장 퀴즈(ForcedQuizScreen)가 먼저 나오게 합니다.
-      home: const ForcedQuizScreen(),
+    // ValueListenableBuilder로 글씨 크기 변경 시 앱 전체 즉시 반영
+    return ValueListenableBuilder<double>(
+      valueListenable: fontScaleNotifier,
+      builder: (_, scale, __) {
+        return MaterialApp(
+          debugShowCheckedModeBanner: false,
+          title: '기초 한글 공부',
+          theme: ThemeData(
+            primarySwatch: Colors.green,
+            // 앱 전체 텍스트 크기를 배율로 조정
+            textTheme: _buildTextTheme(scale),
+          ),
+          builder: (context, child) {
+            // MediaQuery의 textScaleFactor도 함께 override → 완벽하게 전체 적용
+            return MediaQuery(
+              data: MediaQuery.of(context).copyWith(
+                textScaler: TextScaler.linear(scale),
+              ),
+              child: child!,
+            );
+          },
+          home: const HomeScreen(),
+        );
+      },
+    );
+  }
+
+  TextTheme _buildTextTheme(double scale) {
+    return TextTheme(
+      bodyLarge:   TextStyle(fontSize: 16 * scale),
+      bodyMedium:  TextStyle(fontSize: 14 * scale),
+      titleLarge:  TextStyle(fontSize: 22 * scale),
+      titleMedium: TextStyle(fontSize: 18 * scale),
     );
   }
 }
 
-// ----------------------------------------------------
-// 퀴즈 화면 보호기 (입장 퀴즈)
-// ----------------------------------------------------
-class ForcedQuizScreen extends StatefulWidget {
-  const ForcedQuizScreen({super.key});
+// ============================================================
+// 홈 화면
+// ============================================================
+String _currentDateTime = '';
+late final _timer;
 
+class HomeScreen extends StatefulWidget {
+  const HomeScreen({super.key});
   @override
-  State<ForcedQuizScreen> createState() => _ForcedQuizScreenState();
+  State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _ForcedQuizScreenState extends State<ForcedQuizScreen> {
+class _HomeScreenState extends State<HomeScreen> {
   final FlutterTts flutterTts = FlutterTts();
-  final List<Map<String, dynamic>> quizData = [
-    {'q': 'ㄱ', 'a': '기역', 'o': ['기역', '니은', '디귿']},
-    {'q': '가', 'a': '가', 'o': ['나', '가', '다']},
-    {'q': '사과', 'a': '사과', 'o': ['바나나', '포도', '사과']},
-  ];
-  late Map<String, dynamic> currentQuiz;
+  String todayWord = '';
+  List<String> wordList = ['단어 불러오는 중...'];
+  int waterCount = 0;
+  bool _showFontSetting = false; // 글씨 크기 패널 열림 여부
 
   @override
   void initState() {
     super.initState();
-    currentQuiz = quizData[Random().nextInt(quizData.length)];
-    _speakQuestion();
+    _setKoreanVoice();
+    _loadWordsFromFile();
+    _setupHourlyAlarm();
+    _loadPlant();
+    _updateDateTime();
+  _timer = Stream.periodic(const Duration(seconds: 1)).listen((_) => _updateDateTime());
+  }
+  @override
+  void dispose() {
+    _timer.cancel();
+    super.dispose();
+  }
+  void _loadPlant() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() => waterCount = prefs.getInt('waterCount') ?? 0);
+  }
+  void _updateDateTime() {
+  final now = DateTime.now();
+  final weekdays = ['월', '화', '수', '목', '금', '토', '일'];
+  final weekday = weekdays[now.weekday - 1];
+  final hour = now.hour.toString().padLeft(2, '0');
+  final minute = now.minute.toString().padLeft(2, '0');
+  final second = now.second.toString().padLeft(2, '0');
+  setState(() {
+    _currentDateTime =
+        '${now.year}년 ${now.month}월 ${now.day}일 $weekday요일\n$hour : $minute : $second';
+  });
+}
+  Future<void> _loadWordsFromFile() async {
+    final fileText = await rootBundle.loadString('assets/words.txt');
+    setState(() {
+      wordList = fileText
+          .split(RegExp(r'[,\n]'))
+          .map((w) => w.trim())
+          .where((w) => w.isNotEmpty && !w.startsWith('['))
+          .toList();
+      _pickRandomWord();
+    });
   }
 
-  void _speakQuestion() async {
+  void _setupHourlyAlarm() async {
+  const AndroidNotificationDetails androidDetails =
+      AndroidNotificationDetails('study_alarm', '한글 공부 알림',
+          importance: Importance.max, priority: Priority.high);
+  const NotificationDetails platformDetails =
+      NotificationDetails(android: androidDetails);
+
+  await flutterLocalNotificationsPlugin.periodicallyShow(
+    id: 0,
+    title: '⏰ 한글 공부할 시간이에요!',
+    body: '오늘의 단어와 숙제가 기다리고 있어요. 앱을 켜서 확인해 보세요!',
+    repeatInterval: RepeatInterval.hourly,
+    notificationDetails: platformDetails,
+    androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+  );
+}
+
+  Future<void> _setKoreanVoice() async {
     await flutterTts.setLanguage("ko-KR");
     await flutterTts.setSpeechRate(0.35);
-    await flutterTts.speak('공부 시작 전에 문제 하나 풀어볼까요? ${currentQuiz['q']}는 무엇일까요?');
+    await flutterTts.setPitch(1.0);
+  }
+
+  void _pickRandomWord() {
+    final random = Random();
+    setState(() => todayWord = wordList[random.nextInt(wordList.length)]);
+  }
+
+  // 글씨 크기 저장
+  Future<void> _saveFontScale(double value) async {
+    fontScaleNotifier.value = value;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble('fontScale', value);
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.yellow[50],
+      backgroundColor: Colors.green[50],
+      appBar: AppBar(
+        title: const Text('기초 한글 공부',
+            style: TextStyle(fontSize: 26, fontWeight: FontWeight.bold)),
+        backgroundColor: Colors.green[500],
+        foregroundColor: Colors.white,
+        centerTitle: true,
+        elevation: 4,
+        actions: [
+          // 글씨 크기 설정 버튼
+          IconButton(
+            icon: const Icon(Icons.text_fields, size: 28),
+            tooltip: '글씨 크기 조절',
+            onPressed: () => setState(() => _showFontSetting = !_showFontSetting),
+          ),
+        ],
+      ),
       body: Padding(
-        padding: const EdgeInsets.all(30),
+        padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 16.0),
         child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const Text('오늘의 입장 퀴즈', style: TextStyle(fontSize: 24, color: Colors.orange, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 40),
-            Text(currentQuiz['q'], style: const TextStyle(fontSize: 100, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 50),
-            ...List.generate(currentQuiz['o'].length, (index) {
-              String option = currentQuiz['o'][index];
-              return Padding(
-                padding: const EdgeInsets.only(bottom: 20),
-                child: ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(vertical: 25),
-                    textStyle: const TextStyle(fontSize: 28),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                  ),
-                  onPressed: () {
-                    if (option == currentQuiz['a']) {
-                      // 정답이면 메인 홈 화면으로 교체!
-                      Navigator.pushReplacement(context, MaterialPageRoute(builder: (context) => const HomeScreen()));
-                    } else {
-                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('다시 한번 생각해보세요! 🤔')));
-                    }
-                  },
-                  child: Text(option),
+
+            // ── 글씨 크기 조절 패널 (펼쳐지는 형태) ──
+            AnimatedCrossFade(
+              duration: const Duration(milliseconds: 250),
+              crossFadeState: _showFontSetting
+                  ? CrossFadeState.showFirst
+                  : CrossFadeState.showSecond,
+              firstChild: _FontSettingPanel(
+                currentScale: fontScaleNotifier.value,
+                onChanged: _saveFontScale,
+              ),
+              secondChild: const SizedBox.shrink(),
+            ),
+            // ── 날짜/시간 카드 ──
+            Card(
+              elevation: 4,
+              color: Colors.green[100],
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+              child: Padding(
+               padding: const EdgeInsets.symmetric(vertical: 14.0, horizontal: 20.0),
+                child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                   const Icon(Icons.calendar_today, color: Colors.green, size: 28),
+                   const SizedBox(width: 12),
+                   Text(
+                      _currentDateTime,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                       fontSize: 22,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.black87,
+                        height: 1.6,
+          ),
+        ),
+      ],
+    ),
+  ),
+),
+            // ── 오늘의 단어 카드 ──
+            Card(
+              elevation: 4,
+              color: Colors.blue[50],
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(20)),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                    vertical: 14.0, horizontal: 20.0),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Text('💡 오늘의 단어: ',
+                        style: TextStyle(
+                            fontSize: 20,
+                            color: Colors.blue,
+                            fontWeight: FontWeight.bold)),
+                    Text(todayWord,
+                        style: const TextStyle(
+                            fontSize: 26, fontWeight: FontWeight.bold)),
+                    const SizedBox(width: 8),
+                    IconButton(
+                        icon: const Icon(Icons.volume_up,
+                            size: 30, color: Colors.blue),
+                        onPressed: () => flutterTts.speak(todayWord)),
+                    IconButton(
+                        icon: const Icon(Icons.refresh,
+                            size: 26, color: Colors.blueGrey),
+                        onPressed: _pickRandomWord),
+                  ],
                 ),
-              );
-            }),
+              ),
+            ),
             const SizedBox(height: 20),
-            TextButton(
-              onPressed: () => Navigator.pushReplacement(context, MaterialPageRoute(builder: (context) => const HomeScreen())),
-              child: const Text('건너뛰고 바로 시작하기', style: TextStyle(color: Colors.grey, fontSize: 18)),
+
+            // ── 메인 3대 메뉴 ──
+            Expanded(
+              child: Column(
+                children: [
+                  // 1. 화분
+                  Expanded(
+                    child: _MainMenuButton(
+                      emoji: '🪴',
+                      label: '화분',
+                      subLabel: '출석 체크',
+                      color: Colors.pink[400]!,
+                      lightColor: Colors.pink[50]!,
+                      onTap: () async {
+                        await Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                                builder: (_) =>
+                                    PlantScreen(waterCount: waterCount)));
+                        _loadPlant();
+                      },
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+
+                  // 2. 공부하기
+                  Expanded(
+                    child: _MainMenuButton(
+                      emoji: '📖',
+                      label: '공부하기',
+                      subLabel: '자음·모음·가나다·심화',
+                      color: Colors.green[600]!,
+                      lightColor: Colors.green[50]!,
+                      onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                              builder: (_) => const StudyMenuScreen())),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+
+                  // 3. 실습하기
+                  Expanded(
+                    child: _MainMenuButton(
+                      emoji: '✏️',
+                      label: '실습하기',
+                      subLabel: '낱말·숙제·소리 게임',
+                      color: Colors.orange[700]!,
+                      lightColor: Colors.orange[50]!,
+                      onTap: () async {
+                        await Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                                builder: (_) => const PracticeMenuScreen()));
+                        _loadPlant();
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ============================================================
+// 글씨 크기 조절 패널
+// ============================================================
+class _FontSettingPanel extends StatelessWidget {
+  final double currentScale;
+  final ValueChanged<double> onChanged;
+
+  const _FontSettingPanel(
+      {required this.currentScale, required this.onChanged});
+
+  String get _scaleLabel {
+    if (currentScale <= 1.0) return '보통';
+    if (currentScale <= 1.2) return '크게';
+    if (currentScale <= 1.4) return '더 크게';
+    return '매우 크게';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      color: Colors.amber[50],
+      elevation: 3,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      margin: const EdgeInsets.only(bottom: 16),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.text_fields, color: Colors.amber, size: 26),
+                const SizedBox(width: 8),
+                const Text('글씨 크기 조절',
+                    style:
+                        TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+                const Spacer(),
+                // 현재 단계 뱃지
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.amber[300],
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(_scaleLabel,
+                      style: const TextStyle(
+                          fontSize: 16, fontWeight: FontWeight.bold)),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+
+            // 미리보기 텍스트
+            Center(
+              child: Text('가나다 ABC 123',
+                  style: TextStyle(
+                      fontSize: 22 * currentScale,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.black87)),
+            ),
+            const SizedBox(height: 6),
+
+            // 슬라이더
+            Row(
+              children: [
+                const Text('가', style: TextStyle(fontSize: 16)),
+                Expanded(
+                  child: ValueListenableBuilder<double>(
+                    valueListenable: fontScaleNotifier,
+                    builder: (_, scale, __) => Slider(
+                      value: scale,
+                      min: 0.9,
+                      max: 1.6,
+                      divisions: 7,       // 0.9 / 1.0 / 1.1 / 1.2 / 1.3 / 1.4 / 1.5 / 1.6
+                      activeColor: Colors.amber[700],
+                      inactiveColor: Colors.amber[100],
+                      onChanged: onChanged,
+                    ),
+                  ),
+                ),
+                const Text('가',
+                    style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold)),
+              ],
+            ),
+
+            // 빠른 선택 버튼
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: [
+                _QuickScaleButton(label: '보통', scale: 1.0, onTap: onChanged),
+                _QuickScaleButton(label: '크게', scale: 1.2, onTap: onChanged),
+                _QuickScaleButton(label: '더 크게', scale: 1.4, onTap: onChanged),
+                _QuickScaleButton(label: '매우 크게', scale: 1.6, onTap: onChanged),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// 빠른 선택 버튼
+class _QuickScaleButton extends StatelessWidget {
+  final String label;
+  final double scale;
+  final ValueChanged<double> onTap;
+
+  const _QuickScaleButton(
+      {required this.label, required this.scale, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final isSelected =
+        (fontScaleNotifier.value - scale).abs() < 0.05;
+    return GestureDetector(
+      onTap: () => onTap(scale),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: isSelected ? Colors.amber[700] : Colors.white,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+              color: isSelected ? Colors.amber[700]! : Colors.grey[300]!),
+        ),
+        child: Text(label,
+            style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.bold,
+                color: isSelected ? Colors.white : Colors.black87)),
+      ),
+    );
+  }
+}
+
+// ============================================================
+// 메인 메뉴 버튼 - 기존보다 padding 키워서 버튼 높이 ↑
+// ============================================================
+class _MainMenuButton extends StatelessWidget {
+  final String emoji, label, subLabel;
+  final Color color, lightColor;
+  final VoidCallback onTap;
+
+  const _MainMenuButton({
+    required this.emoji,
+    required this.label,
+    required this.subLabel,
+    required this.color,
+    required this.lightColor,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        // ── 버튼 높이를 꽉 채우도록 constraints 제거하고 Expanded가 담당 ──
+        decoration: BoxDecoration(
+          color: lightColor,
+          borderRadius: BorderRadius.circular(28),
+          border: Border.all(color: color, width: 3),       // 테두리 두껍게
+          boxShadow: [
+            BoxShadow(
+                color: color.withOpacity(0.3),
+                blurRadius: 10,
+                offset: const Offset(0, 5))
+          ],
+        ),
+        child: Row(
+          children: [
+            // 왼쪽 컬러 영역 - 너비 늘림
+            Container(
+              width: 100,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: color,
+                borderRadius: const BorderRadius.only(
+                    topLeft: Radius.circular(26),
+                    bottomLeft: Radius.circular(26)),
+              ),
+              child: Text(emoji, style: const TextStyle(fontSize: 52)),  // 이모지 크게
+            ),
+            const SizedBox(width: 22),
+            Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(label,
+                    style: TextStyle(
+                        fontSize: 34,           // 기존 32 → 34
+                        fontWeight: FontWeight.bold,
+                        color: color)),
+                const SizedBox(height: 6),
+                Text(subLabel,
+                    style: const TextStyle(
+                        fontSize: 18,           // 기존 17 → 18
+                        color: Colors.black54)),
+              ],
             ),
           ],
         ),
