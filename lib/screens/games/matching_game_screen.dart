@@ -2,12 +2,14 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:flutter_application_1/utils/quiz_data_loader.dart';
+import 'package:audioplayers/audioplayers.dart';
 
 class MatchingGameScreen extends StatefulWidget {
   const MatchingGameScreen({super.key});
   @override
   State<MatchingGameScreen> createState() => _MatchingGameScreenState();
 }
+final AudioPlayer _audioPlayer = AudioPlayer();
 
 class _MatchingGameScreenState extends State<MatchingGameScreen> {
   final FlutterTts _tts = FlutterTts();
@@ -34,6 +36,7 @@ class _MatchingGameScreenState extends State<MatchingGameScreen> {
   @override
   void dispose() {
     _tts.stop();
+    _audioPlayer.dispose();
     super.dispose();
   }
 
@@ -80,44 +83,56 @@ class _MatchingGameScreenState extends State<MatchingGameScreen> {
   }
 
   void _checkMatch() {
-    _isChecking = true;
-    final iconIdx = _selectedIconIndex!;
-    final wordIdx = _selectedWordIndex!;
+  _isChecking = true;
+  final iconIdx = _selectedIconIndex!;
+  final wordIdx = _selectedWordIndex!;
 
-    if (iconIdx == wordIdx) {
-      Future.delayed(const Duration(milliseconds: 300), () {
+  if (iconIdx == wordIdx) {
+    Future.delayed(const Duration(milliseconds: 300), () async {
+      setState(() {
+        _matchedIndexes.add(iconIdx);
+        _selectedIconIndex = null;
+        _selectedWordIndex = null;
+        _isChecking = false;
+        _tries++;
+      });
+
+      // 🌟 짝 맞출 때마다 효과음 (축하말 없이)
+      await _audioPlayer.play(UrlSource(
+        'https://www.soundjay.com/buttons/sounds/button-09.mp3'
+      ));
+
+      // 🌟 다 맞추면 축하 멘트
+      if (_matchedIndexes.length == 6) {
+        Future.delayed(const Duration(milliseconds: 800), () {
+          _tts.speak(getRandomPraise());
+          Future.delayed(const Duration(milliseconds: 800), _showResult);
+        });
+      }
+    });
+  } else {
+    Future.delayed(const Duration(milliseconds: 100), () {
+      setState(() {
+        _wrongIconIndexes = {iconIdx};
+        _wrongWordIndexes = {wordIdx};
+        _tries++;
+      });
+      // 🌟 오답 효과음
+      _audioPlayer.play(UrlSource(
+        'https://www.soundjay.com/buttons/sounds/button-10.mp3'
+      ));
+      Future.delayed(const Duration(milliseconds: 800), () {
         setState(() {
-          _matchedIndexes.add(iconIdx);
           _selectedIconIndex = null;
           _selectedWordIndex = null;
+          _wrongIconIndexes = {};
+          _wrongWordIndexes = {};
           _isChecking = false;
-          _tries++;
-        });
-        _tts.speak(getRandomPraise());
-        if (_matchedIndexes.length == 6) {
-          Future.delayed(const Duration(milliseconds: 800), _showResult);
-        }
-      });
-    } else {
-      Future.delayed(const Duration(milliseconds: 100), () {
-        setState(() {
-          _wrongIconIndexes = {iconIdx};
-          _wrongWordIndexes = {wordIdx};
-          _tries++;
-        });
-        _tts.speak('다시 해보세요');
-        Future.delayed(const Duration(milliseconds: 800), () {
-          setState(() {
-            _selectedIconIndex = null;
-            _selectedWordIndex = null;
-            _wrongIconIndexes = {};
-            _wrongWordIndexes = {};
-            _isChecking = false;
-          });
         });
       });
-    }
+    });
   }
+}
 
   void _showResult() {
     showDialog(

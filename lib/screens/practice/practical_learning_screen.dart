@@ -3,12 +3,13 @@ import 'package:flutter_tts/flutter_tts.dart';
 import 'package:signature/signature.dart';
 import 'package:flutter_application_1/utils/quiz_data_loader.dart';
 
+
 class PracticalLearningScreen extends StatefulWidget {
   const PracticalLearningScreen({super.key});
   @override
   State<PracticalLearningScreen> createState() => _PracticalLearningScreenState();
 }
-
+DateTime? _lastInstructionTime; // 🌟 마지막 안내 음성 시각
 class _PracticalLearningScreenState extends State<PracticalLearningScreen> {
   List<PracticalWord> practicalWords = [];
   int currentIndex = 0;
@@ -39,21 +40,30 @@ class _PracticalLearningScreenState extends State<PracticalLearningScreen> {
     _playInstruction();
   }
 
-  Future<void> _playInstruction() async {
-    if (practicalWords.isEmpty) return;
+ Future<void> _playInstruction() async {
+  if (practicalWords.isEmpty) return;
 
-    final word = practicalWords[currentIndex].word;
+  final word = practicalWords[currentIndex].word;
+  setState(() {
+    _instructionText = '사진을 보고 "$word" 를\n아래 빈칸에 따라 써보세요!';
+  });
 
-    // 1. 지시 문구 텍스트 업데이트
-    setState(() {
-      _instructionText = '사진을 보고 "$word" 를\n아래 빈칸에 따라 써보세요!';
-    });
-
+  // 🌟 마지막 안내로부터 60초 안 지났으면 단어만 읽기
+  final now = DateTime.now();
+  if (_lastInstructionTime != null &&
+      now.difference(_lastInstructionTime!).inSeconds < 60) {
     await flutterTts.setSpeechRate(0.35);
-    await flutterTts.speak('사진을 보고 무엇인지 들어보세요. 그 다음 아래에 따라 써보세요.');
-    await Future.delayed(const Duration(seconds: 3));
-    if (mounted) await flutterTts.speak(word);
+    await flutterTts.speak(word);
+    return;
   }
+
+  // 60초 지났으면 안내 멘트 + 단어 읽기
+  _lastInstructionTime = now;
+  await flutterTts.setSpeechRate(0.35);
+  await flutterTts.speak('사진을 보고 무엇인지 들어보세요. 그 다음 아래에 따라 써보세요.');
+  await Future.delayed(const Duration(seconds: 3));
+  if (mounted) await flutterTts.speak(word);
+}
 
   @override
   Widget build(BuildContext context) {

@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:flutter_application_1/utils/quiz_data_loader.dart';
 import 'package:shared_preferences/shared_preferences.dart';  // ← 이 줄 추가
-
+import 'package:audioplayers/audioplayers.dart';
 
 /// 숙제: 소리 듣고 맞히기
 /// assets/practical_words.txt에서 매번 10문제 무작위로 뽑습니다.
@@ -11,7 +11,7 @@ class ListeningGameScreen extends StatefulWidget {
   @override
   State<ListeningGameScreen> createState() => _ListeningGameScreenState();
 }
-
+final AudioPlayer _audioPlayer = AudioPlayer();
 class _ListeningGameScreenState extends State<ListeningGameScreen> {
   final FlutterTts flutterTts = FlutterTts();
 
@@ -42,10 +42,19 @@ class _ListeningGameScreenState extends State<ListeningGameScreen> {
     // 첫 문제 자동 읽기
     await Future.delayed(const Duration(milliseconds: 500));
     if (mounted && _quizList.isNotEmpty) {
-      flutterTts.speak(_quizList[0].item.word);
+      await _audioPlayer.play(UrlSource(
+  'https://www.soundjay.com/buttons/sounds/button-09.mp3'
+));
+await Future.delayed(const Duration(milliseconds: 800));
+flutterTts.speak(_quizList[0].item.word);
     }
   }
-
+  @override
+  void dispose() {
+    _audioPlayer.dispose();
+    flutterTts.stop();
+    super.dispose();
+}
   void checkAnswer(String selected) {
     final correct = _quizList[_currentStep].item.word;
     if (selected == correct) {
@@ -54,8 +63,13 @@ class _ListeningGameScreenState extends State<ListeningGameScreen> {
       if (_currentStep >= _quizList.length) {
         _showCompletionDialog();
       } else {
-        Future.delayed(const Duration(seconds: 1),
-            () => flutterTts.speak(_quizList[_currentStep].item.word));
+       Future.delayed(const Duration(seconds: 1), () async {
+  await _audioPlayer.play(UrlSource(
+    'https://www.soundjay.com/buttons/sounds/button-09.mp3'
+  ));
+  await Future.delayed(const Duration(milliseconds: 800));
+  flutterTts.speak(_quizList[_currentStep].item.word);
+});
       }
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -141,7 +155,13 @@ Future<void> _saveStudyRecord() async {
                   backgroundColor: Colors.purple[100],
                   elevation: 8,
                 ),
-                onPressed: () => flutterTts.speak(quiz.item.word),
+                onPressed: () async {
+                      await _audioPlayer.play(UrlSource(
+                         'https://www.soundjay.com/buttons/sounds/button-09.mp3'
+                        ));
+                       await Future.delayed(const Duration(milliseconds: 800));
+                      flutterTts.speak(quiz.item.word);
+                },
                 child: const Icon(Icons.volume_up, size: 80, color: Colors.purple),
               ),
             ),

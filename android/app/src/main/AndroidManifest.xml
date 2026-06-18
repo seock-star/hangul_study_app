@@ -10,7 +10,7 @@
     <!-- 폰 재부팅 후 알람 자동 재등록 -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
     <application
-        android:label="flutter_application_1"
+        android:label="어르신 한글공부"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity
