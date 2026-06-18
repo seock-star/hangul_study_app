@@ -4,7 +4,7 @@ import 'package:flutter_tts/flutter_tts.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:math';
-
+import 'package:flutter_application_1/screens/forced_quiz_screen.dart';
 import 'package:flutter_application_1/screens/plant_screen.dart';
 import 'package:flutter_application_1/screens/study/study_menu_screen.dart';
 import 'package:flutter_application_1/screens/practice/practice_menu_screen.dart';
@@ -89,11 +89,15 @@ class _HomeScreenState extends State<HomeScreen> {
     super.initState();
     _setKoreanVoice();
     _loadWordsFromFile();
-    _setupHourlyAlarm();
+    _setupAlarms();
     _loadPlant();
     _updateDateTime();
     _timer = Stream.periodic(const Duration(seconds: 1))
         .listen((_) => _updateDateTime());
+         // 🌟 앱 켤 때 강제 퀴즈 체크 (4시간마다)
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    _checkForcedQuiz();
+  });
   }
 
   @override
@@ -131,22 +135,100 @@ class _HomeScreenState extends State<HomeScreen> {
       _pickRandomWord();
     });
   }
+// 🌟 4시간마다 강제 퀴즈 체크
+Future<void> _checkForcedQuiz() async {
+  final prefs = await SharedPreferences.getInstance();
+  final now = DateTime.now();
+  final lastQuizTime = prefs.getInt('lastQuizTime') ?? 0;
+  final lastQuizDateTime =
+      DateTime.fromMillisecondsSinceEpoch(lastQuizTime);
+  final hoursSinceLastQuiz =
+      now.difference(lastQuizDateTime).inHours;
 
-  void _setupHourlyAlarm() async {
-    const AndroidNotificationDetails androidDetails =
-        AndroidNotificationDetails('study_alarm', '한글 공부 알림',
-            importance: Importance.max, priority: Priority.high);
-    const NotificationDetails platformDetails =
-        NotificationDetails(android: androidDetails);
-    await flutterLocalNotificationsPlugin.periodicallyShow(
-      id: 0,
-      title: '⏰ 한글 공부할 시간이에요!',
-      body: '오늘의 단어와 숙제가 기다리고 있어요. 앱을 켜서 확인해 보세요!',
-      repeatInterval: RepeatInterval.hourly,
-      notificationDetails: platformDetails,
-      androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
-    );
+  // 4시간 이상 지났으면 강제 퀴즈
+  if (hoursSinceLastQuiz >= 4) {
+    if (mounted) {
+      await Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => ForcedQuizScreen(
+            onComplete: () async {
+              // 퀴즈 완료 시간 저장
+              await prefs.setInt(
+                'lastQuizTime',
+                DateTime.now().millisecondsSinceEpoch,
+              );
+            },
+          ),
+        ),
+      );
+    }
   }
+}
+  void _setupAlarms() async {
+  const AndroidNotificationDetails androidDetails =
+      AndroidNotificationDetails(
+    'study_alarm',
+    '한글 공부 알림',
+    importance: Importance.max,
+    priority: Priority.high,
+  );
+  const NotificationDetails platformDetails =
+      NotificationDetails(android: androidDetails);
+
+  // 기존 알람 전체 취소
+  await flutterLocalNotificationsPlugin.cancelAll();
+
+  // 2번: 점심 후 알람 (12:30)
+  await flutterLocalNotificationsPlugin.show(
+  id: 1,
+  title: '🍚 점심 드셨나요?',
+  body: '밥 먹고 한글 공부 5분만 해봐요! 오늘 미션이 기다려요 📚',
+  notificationDetails: platformDetails,
+);
+
+  // 2번: 저녁 후 알람 (18:30)
+  await flutterLocalNotificationsPlugin.show(
+  id: 2,
+  title: '🌙 저녁 드셨나요?',
+  body: '하루 마무리로 한글 공부 어떠세요? 오늘 스트릭을 지켜요! 🔥',
+  notificationDetails: platformDetails,
+);
+
+  // 3번: 스트릭 위기 알람 체크
+  _checkStreakAlarm(platformDetails);
+
+  // 4시간마다 반복 알람
+  await flutterLocalNotificationsPlugin.periodicallyShow(
+  id: 0,
+  title: '📚 한글 공부 시간이에요!',
+  body: '공부 안 하면 앱 열 때 퀴즈가 기다려요 😤',
+  repeatInterval: RepeatInterval.hourly,        // ← 이걸로 교체
+  notificationDetails: platformDetails,
+  androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+);
+}
+
+// 3번: 스트릭 위기 알람
+void _checkStreakAlarm(NotificationDetails platformDetails) async {
+  final prefs = await SharedPreferences.getInstance();
+  final streak = prefs.getInt('streakDays') ?? 0;
+  if (streak < 2) return; // 스트릭 2일 미만이면 패스
+
+  final today = DateTime.now();
+  final todayKey = '${today.year}-${today.month}-${today.day}';
+  final lastStudyDate = prefs.getString('lastStudyDate') ?? '';
+
+  // 오늘 아직 공부 안 했으면 스트릭 위기 알람
+  if (lastStudyDate != todayKey) {
+    await flutterLocalNotificationsPlugin.show(
+  id: 3,
+  title: '⚠️ 스트릭 위기! 🔥 $streak일이 끊겨요!',
+  body: '오늘 공부 안 하면 $streak일 연속 기록이 사라져요! 지금 바로 시작해요!',
+  notificationDetails: platformDetails,
+);
+  }
+}
 
   Future<void> _setKoreanVoice() async {
     await flutterTts.setLanguage("ko-KR");
@@ -207,70 +289,156 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
 
               // ── 날짜/시간 카드 ──
-              Card(
-                elevation: 4,
-                color: Colors.green[100],
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(20)),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                      vertical: 14.0, horizontal: 20.0),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      const Icon(Icons.calendar_today,
-                          color: Colors.green, size: 28),
-                      const SizedBox(width: 12),
-                      Text(
-                        _currentDateTime,
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(
-                          fontSize: 22,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.black87,
-                          height: 1.6,
-                        ),
-                      ),
-                    ],
-                  ),
+              // ── 날짜/시간 카드 ──
+Card(
+  elevation: 6,
+  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+  child: Container(
+    decoration: BoxDecoration(
+      borderRadius: BorderRadius.circular(24),
+      gradient: LinearGradient(
+        colors: [Colors.green[400]!, Colors.teal[400]!],
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+      ),
+      boxShadow: [
+        BoxShadow(
+          color: Colors.green.withOpacity(0.4),
+          blurRadius: 12,
+          offset: const Offset(0, 4),
+        ),
+      ],
+    ),
+    padding: const EdgeInsets.symmetric(vertical: 18, horizontal: 20),
+    child: Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        Container(
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            color: Colors.white.withOpacity(0.25),
+            shape: BoxShape.circle,
+          ),
+          child: const Icon(Icons.calendar_today,
+              color: Colors.white, size: 30),
+        ),
+        const SizedBox(width: 16),
+        // ← Flexible로 감싸서 글씨 커져도 박스 안에서 처리
+        Flexible(
+          child: Text(
+            _currentDateTime,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              fontSize: 20,
+              fontWeight: FontWeight.bold,
+              color: Colors.white,
+              height: 1.7,
+              shadows: [
+                Shadow(
+                  color: Colors.black26,
+                  offset: Offset(1, 1),
+                  blurRadius: 3,
                 ),
-              ),
-              const SizedBox(height: 12),
+              ],
+            ),
+          ),
+        ),
+      ],
+    ),
+  ),
+),
+const SizedBox(height: 12),
 
-              // ── 오늘의 단어 카드 ──
-              Card(
-                elevation: 4,
-                color: Colors.blue[50],
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(20)),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                      vertical: 14.0, horizontal: 20.0),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      const Text('💡 오늘의 단어: ',
-                          style: TextStyle(
-                              fontSize: 20,
-                              color: Colors.blue,
-                              fontWeight: FontWeight.bold)),
-                      Text(todayWord,
-                          style: const TextStyle(
-                              fontSize: 26, fontWeight: FontWeight.bold)),
-                      const SizedBox(width: 8),
-                      IconButton(
-                          icon: const Icon(Icons.volume_up,
-                              size: 30, color: Colors.blue),
-                          onPressed: () => flutterTts.speak(todayWord)),
-                      IconButton(
-                          icon: const Icon(Icons.refresh,
-                              size: 26, color: Colors.blueGrey),
-                          onPressed: _pickRandomWord),
-                    ],
-                  ),
+             // ── 오늘의 단어 카드 ──
+Card(
+  elevation: 6,
+  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+  child: Container(
+    decoration: BoxDecoration(
+      borderRadius: BorderRadius.circular(24),
+      gradient: LinearGradient(
+        colors: [Colors.blue[300]!, Colors.indigo[300]!],
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+      ),
+      boxShadow: [
+        BoxShadow(
+          color: Colors.blue.withOpacity(0.3),
+          blurRadius: 12,
+          offset: const Offset(0, 4),
+        ),
+      ],
+    ),
+    padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 20),
+    child: Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        Container(
+          padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            color: Colors.white.withOpacity(0.25),
+            shape: BoxShape.circle,
+          ),
+          child: const Text('💡', style: TextStyle(fontSize: 24)),
+        ),
+        const SizedBox(width: 12),
+        // ← Flexible로 감싸서 글씨 커져도 줄바꿈으로 처리
+        Flexible(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                '오늘의 단어',
+                style: TextStyle(
+                  fontSize: 14,
+                  color: Colors.white70,
+                  fontWeight: FontWeight.w500,
                 ),
               ),
-              const SizedBox(height: 20),
+              const SizedBox(height: 2),
+              Text(
+                todayWord,
+                style: const TextStyle(
+                  fontSize: 28,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                  shadows: [
+                    Shadow(
+                      color: Colors.black26,
+                      offset: Offset(1, 1),
+                      blurRadius: 3,
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(width: 8),
+        // 버튼 두 개
+        Column(
+          children: [
+            IconButton(
+              icon: const Icon(Icons.volume_up,
+                  size: 28, color: Colors.white),
+              onPressed: () => flutterTts.speak(todayWord),
+              tooltip: '소리 듣기',
+            ),
+            IconButton(
+              icon: const Icon(Icons.refresh,
+                  size: 24, color: Colors.white70),
+              onPressed: _pickRandomWord,
+              tooltip: '다른 단어',
+            ),
+          ],
+        ),
+      ],
+    ),
+  ),
+),
+const SizedBox(height: 20),
 
               // ── 메인 3대 메뉴 ──
               _MainMenuButton(

@@ -2,8 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:flutter_application_1/utils/quiz_data_loader.dart';
 
-/// 🔗 끝말잇기 - 고정 데이터 (단어 관계가 중요해서 자동생성 어려움)
-/// 단, 매번 문제 순서를 섞어서 제공합니다.
 class WordChainGameScreen extends StatefulWidget {
   const WordChainGameScreen({super.key});
   @override
@@ -13,7 +11,6 @@ class WordChainGameScreen extends StatefulWidget {
 class _WordChainGameScreenState extends State<WordChainGameScreen> {
   final FlutterTts _tts = FlutterTts();
 
-  // 고정 체인 세트 - 순서는 initState에서 섞음
   final List<Map<String, dynamic>> _allRounds = [
     {'chain': '사과', 'options': ['과자', '자동차', '나무'], 'answer': '과자', 'hint': '사과 → 과___'},
     {'chain': '과자', 'options': ['자동차', '가방', '파도'], 'answer': '자동차', 'hint': '과자 → 자___'},
@@ -42,43 +39,115 @@ class _WordChainGameScreenState extends State<WordChainGameScreen> {
     _initGame();
   }
 
+  @override
+  void dispose() {
+    _tts.stop();
+    super.dispose();
+  }
+
   void _initGame() {
     _rounds = List.of(_allRounds)..shuffle();
     _rounds = _rounds.take(10).toList();
-    _step = 0; _correct = 0; _selected = null; _answered = false;
-    setState(() {});
-    _speakQuestion();
+    setState(() {
+      _step = 0;
+      _correct = 0;
+      _selected = null;
+      _answered = false;
+    });
+    Future.delayed(const Duration(milliseconds: 400), _speakQuestion);
   }
 
   void _speakQuestion() {
     final r = _rounds[_step];
     final chain = r['chain'] as String;
     final lastChar = chain[chain.length - 1];
-    _tts.speak('"$chain"의 마지막 글자는 "$lastChar"입니다. 이 글자로 시작하는 단어를 고르세요!');
+    _tts.speak(
+        '"$chain"의 마지막 글자는 "$lastChar"입니다. 이 글자로 시작하는 단어를 고르세요!');
   }
 
   void _select(String opt) {
     if (_answered) return;
     final answer = _rounds[_step]['answer'] as String;
-    setState(() { _selected = opt; _answered = true; });
-    if (opt == answer) { _correct++; _tts.speak('${getRandomPraise()} $opt 맞아요!'); }
-    else { _tts.speak('아쉬워요. 정답은 $answer 예요.'); }
+    setState(() {
+      _selected = opt;
+      _answered = true;
+    });
+    if (opt == answer) {
+      _correct++;
+      _tts.speak('${getRandomPraise()} $opt 맞아요!');
+    } else {
+      _tts.speak('아쉬워요. 정답은 $answer 예요.');
+    }
   }
 
   void _next() {
-    if (_step + 1 >= _rounds.length) { _showResult(); return; }
-    setState(() { _step++; _selected = null; _answered = false; });
-    _speakQuestion();
+    if (_step + 1 >= _rounds.length) {
+      _showResult();
+      return;
+    }
+    setState(() {
+      _step++;
+      _selected = null;
+      _answered = false;
+    });
+    Future.delayed(const Duration(milliseconds: 400), _speakQuestion);
   }
 
   void _showResult() {
-    showDialog(context: context, barrierDismissible: false,
+    _tts.speak('끝말잇기를 모두 마쳤어요! $_correct개 맞혔어요! 어휘력이 정말 대단하세요!');
+    showDialog(
+      context: context,
+      barrierDismissible: false,
       builder: (_) => AlertDialog(
-        title: const Text('🎉 끝말잇기 완료!'),
-        content: Text('${_rounds.length}문제 중 $_correct개 맞혔어요! 어휘력이 대단해요! 🏆'),
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(24)),
+        title: const Text('🎉 끝말잇기 완료!',
+            style: TextStyle(fontSize: 26),
+            textAlign: TextAlign.center),
+        content: Text(
+          '${_rounds.length}문제 중 $_correct개 맞혔어요!\n어휘력이 대단해요! 🏆',
+          style: const TextStyle(fontSize: 20, height: 1.6),
+          textAlign: TextAlign.center,
+        ),
         actions: [
-          TextButton(onPressed: () { Navigator.pop(context); _initGame(); }, child: const Text('다시 하기', style: TextStyle(fontSize: 20))),
-          TextButton(onPressed: () { Navigator.pop(context); Navigator.pop(context); }, child: const Text('끝내기', style: TextStyle(fontSize: 20))),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton(
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    textStyle: const TextStyle(fontSize: 20),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14)),
+                  ),
+                  onPressed: () {
+                    Navigator.pop(context);
+                    _initGame();
+                  },
+                  child: const Text('다시 하기'),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.purple[500],
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    textStyle: const TextStyle(fontSize: 20),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14)),
+                  ),
+                  onPressed: () {
+                    _tts.stop();
+                    Navigator.pop(context);
+                    Navigator.pop(context);
+                  },
+                  child: const Text('끝내기'),
+                ),
+              ),
+            ],
+          ),
         ],
       ),
     );
@@ -86,64 +155,233 @@ class _WordChainGameScreenState extends State<WordChainGameScreen> {
 
   @override
   Widget build(BuildContext context) {
-    if (_rounds.isEmpty) return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    if (_rounds.isEmpty) {
+      return const Scaffold(
+          body: Center(child: CircularProgressIndicator()));
+    }
+
     final r = _rounds[_step];
     final answer = r['answer'] as String;
     final chain = r['chain'] as String;
     final lastChar = chain[chain.length - 1];
 
     return Scaffold(
-      appBar: AppBar(title: Text('🔗 끝말잇기  ${_step + 1}/${_rounds.length}'),
-          backgroundColor: Colors.purple[500], foregroundColor: Colors.white),
-      backgroundColor: Colors.purple[50],
-      body: Padding(
-        padding: const EdgeInsets.all(24),
+      appBar: AppBar(
+        title: Text('🔗 끝말잇기  ${_step + 1}/${_rounds.length}',
+            style: const TextStyle(fontSize: 20)),
+        backgroundColor: Colors.purple[500],
+        foregroundColor: Colors.white,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () {
+            _tts.stop();
+            Navigator.pop(context);
+          },
+        ),
+      ),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(20),
         child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            LinearProgressIndicator(value: (_step + 1) / _rounds.length, minHeight: 12, color: Colors.purple, backgroundColor: Colors.grey[300], borderRadius: BorderRadius.circular(8)),
-            const SizedBox(height: 30),
-            Container(
-              width: double.infinity, padding: const EdgeInsets.all(20),
-              decoration: BoxDecoration(color: Colors.purple[100], borderRadius: BorderRadius.circular(20)),
-              child: Column(children: [
-                Text(chain, style: const TextStyle(fontSize: 48, fontWeight: FontWeight.bold)),
-                const SizedBox(height: 8),
-                Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                  Text('"$lastChar"(으)로 시작하는 단어는?', style: TextStyle(fontSize: 20, color: Colors.purple[800])),
-                  IconButton(icon: Icon(Icons.volume_up, color: Colors.purple[700], size: 28), onPressed: _speakQuestion),
-                ]),
-              ]),
-            ),
-            const SizedBox(height: 12),
-            Text(r['hint'], style: TextStyle(fontSize: 18, color: Colors.purple[600], fontWeight: FontWeight.bold)),
-            const Spacer(),
-            ...(r['options'] as List<String>).map((opt) {
-              Color btnColor = Colors.white;
-              if (_answered) {
-                if (opt == answer) btnColor = Colors.green[200]!;
-                else if (opt == _selected) btnColor = Colors.red[200]!;
-              }
-              return Padding(
-                padding: const EdgeInsets.only(bottom: 16),
-                child: ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: btnColor, foregroundColor: Colors.black87,
-                    padding: const EdgeInsets.symmetric(vertical: 20),
-                    textStyle: const TextStyle(fontSize: 26, fontWeight: FontWeight.bold),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                    elevation: 4, minimumSize: const Size(double.infinity, 0),
+
+            // ── 진행 바 ──
+            Row(
+              children: [
+                Expanded(
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(10),
+                    child: LinearProgressIndicator(
+                      value: (_step + 1) / _rounds.length,
+                      minHeight: 14,
+                      color: Colors.purple,
+                      backgroundColor: Colors.grey[300],
+                    ),
                   ),
-                  onPressed: () => _select(opt),
-                  child: Text(opt),
+                ),
+                const SizedBox(width: 12),
+                Text('${_step + 1} / ${_rounds.length}',
+                    style: const TextStyle(
+                        fontSize: 16, fontWeight: FontWeight.bold)),
+              ],
+            ),
+            const SizedBox(height: 24),
+
+            // ── 현재 단어 카드 ──
+            Card(
+              elevation: 5,
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(24)),
+              child: Container(
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(24),
+                  gradient: LinearGradient(
+                    colors: [Colors.purple[300]!, Colors.purple[500]!],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                ),
+                padding: const EdgeInsets.symmetric(
+                    vertical: 28, horizontal: 20),
+                child: Column(
+                  children: [
+                    // 현재 단어
+                    Text(
+                      chain,
+                      style: const TextStyle(
+                          fontSize: 52,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white),
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 12),
+                    // 마지막 글자 강조
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 20, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.25),
+                        borderRadius: BorderRadius.circular(30),
+                      ),
+                      child: Wrap(
+                        alignment: WrapAlignment.center,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        spacing: 8,
+                        children: [
+                          Text(
+                            '"$lastChar"(으)로 시작하는 단어는?',
+                            style: const TextStyle(
+                                fontSize: 18,
+                                color: Colors.white,
+                                fontWeight: FontWeight.w500),
+                            textAlign: TextAlign.center,
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.volume_up,
+                                color: Colors.white, size: 24),
+                            onPressed: _speakQuestion,
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    // 힌트
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 16, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.15),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Text(
+                        r['hint'],
+                        style: const TextStyle(
+                            fontSize: 16,
+                            color: Colors.white70,
+                            fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 24),
+
+            // ── 보기 버튼 ──
+            ...(r['options'] as List<String>).map((opt) {
+              Color bgColor = Colors.white;
+              Color borderColor = Colors.purple[200]!;
+              Color textColor = Colors.black87;
+              IconData? icon;
+
+              if (_answered) {
+                if (opt == answer) {
+                  bgColor = Colors.green[50]!;
+                  borderColor = Colors.green;
+                  textColor = Colors.green[800]!;
+                  icon = Icons.check_circle;
+                } else if (opt == _selected) {
+                  bgColor = Colors.red[50]!;
+                  borderColor = Colors.red;
+                  textColor = Colors.red[800]!;
+                  icon = Icons.cancel;
+                }
+              }
+
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 14),
+                child: GestureDetector(
+                  onTap: () => _select(opt),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 200),
+                    padding: const EdgeInsets.symmetric(
+                        vertical: 20, horizontal: 20),
+                    decoration: BoxDecoration(
+                      color: bgColor,
+                      borderRadius: BorderRadius.circular(18),
+                      border:
+                          Border.all(color: borderColor, width: 2.5),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withOpacity(0.06),
+                          blurRadius: 6,
+                          offset: const Offset(0, 3),
+                        ),
+                      ],
+                    ),
+                    child: Row(
+                      children: [
+                        if (icon != null) ...[
+                          Icon(icon, color: textColor, size: 26),
+                          const SizedBox(width: 12),
+                        ] else ...[
+                          const SizedBox(width: 38),
+                        ],
+                        Expanded(
+                          child: Text(
+                            opt,
+                            style: TextStyle(
+                              fontSize: 26,
+                              fontWeight: FontWeight.bold,
+                              color: textColor,
+                            ),
+                            textAlign: TextAlign.center,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                 ),
               );
             }),
-            if (_answered) ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: Colors.purple[500], foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 18), textStyle: const TextStyle(fontSize: 22)),
-              onPressed: _next,
-              child: Text(_step + 1 >= _rounds.length ? '결과 보기 🏆' : '다음 문제 👉'),
-            ),
+
+            const SizedBox(height: 8),
+
+            // ── 다음 문제 버튼 ──
+            if (_answered)
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor:
+                      _selected == answer ? Colors.green : Colors.orange,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 18),
+                  textStyle: const TextStyle(
+                      fontSize: 22, fontWeight: FontWeight.bold),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16)),
+                  elevation: 4,
+                ),
+                onPressed: _next,
+                child: Text(
+                  _step + 1 >= _rounds.length
+                      ? '결과 보기 🏆'
+                      : _selected == answer
+                          ? '다음 문제 👉'
+                          : '다음 문제로 넘어가기 👉',
+                ),
+              ),
             const SizedBox(height: 20),
           ],
         ),

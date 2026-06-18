@@ -2,14 +2,12 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:flutter_application_1/utils/quiz_data_loader.dart';
-import 'package:audioplayers/audioplayers.dart';
 
 class MatchingGameScreen extends StatefulWidget {
   const MatchingGameScreen({super.key});
   @override
   State<MatchingGameScreen> createState() => _MatchingGameScreenState();
 }
-final AudioPlayer _audioPlayer = AudioPlayer();
 
 class _MatchingGameScreenState extends State<MatchingGameScreen> {
   final FlutterTts _tts = FlutterTts();
@@ -36,7 +34,6 @@ class _MatchingGameScreenState extends State<MatchingGameScreen> {
   @override
   void dispose() {
     _tts.stop();
-    _audioPlayer.dispose();
     super.dispose();
   }
 
@@ -55,6 +52,9 @@ class _MatchingGameScreenState extends State<MatchingGameScreen> {
       _tries = 0;
       _isLoading = false;
     });
+    // 시작 안내
+    await Future.delayed(const Duration(milliseconds: 400));
+    if (mounted) _tts.speak('그림과 글자를 짝지어 맞춰보세요!');
   }
 
   void _onIconTap(int index) {
@@ -83,75 +83,100 @@ class _MatchingGameScreenState extends State<MatchingGameScreen> {
   }
 
   void _checkMatch() {
-  _isChecking = true;
-  final iconIdx = _selectedIconIndex!;
-  final wordIdx = _selectedWordIndex!;
+    _isChecking = true;
+    final iconIdx = _selectedIconIndex!;
+    final wordIdx = _selectedWordIndex!;
 
-  if (iconIdx == wordIdx) {
-    Future.delayed(const Duration(milliseconds: 300), () async {
-      setState(() {
-        _matchedIndexes.add(iconIdx);
-        _selectedIconIndex = null;
-        _selectedWordIndex = null;
-        _isChecking = false;
-        _tries++;
-      });
-
-      // 🌟 짝 맞출 때마다 효과음 (축하말 없이)
-      await _audioPlayer.play(UrlSource(
-        'https://www.soundjay.com/buttons/sounds/button-09.mp3'
-      ));
-
-      // 🌟 다 맞추면 축하 멘트
-      if (_matchedIndexes.length == 6) {
-        Future.delayed(const Duration(milliseconds: 800), () {
-          _tts.speak(getRandomPraise());
-          Future.delayed(const Duration(milliseconds: 800), _showResult);
-        });
-      }
-    });
-  } else {
-    Future.delayed(const Duration(milliseconds: 100), () {
-      setState(() {
-        _wrongIconIndexes = {iconIdx};
-        _wrongWordIndexes = {wordIdx};
-        _tries++;
-      });
-      // 🌟 오답 효과음
-      _audioPlayer.play(UrlSource(
-        'https://www.soundjay.com/buttons/sounds/button-10.mp3'
-      ));
-      Future.delayed(const Duration(milliseconds: 800), () {
+    if (iconIdx == wordIdx) {
+      Future.delayed(const Duration(milliseconds: 300), () {
         setState(() {
+          _matchedIndexes.add(iconIdx);
           _selectedIconIndex = null;
           _selectedWordIndex = null;
-          _wrongIconIndexes = {};
-          _wrongWordIndexes = {};
           _isChecking = false;
+          _tries++;
+        });
+        if (_matchedIndexes.length == 6) {
+          Future.delayed(const Duration(milliseconds: 400), () {
+            _tts.speak(getRandomPraise());
+            Future.delayed(
+                const Duration(milliseconds: 1200), _showResult);
+          });
+        }
+      });
+    } else {
+      Future.delayed(const Duration(milliseconds: 100), () {
+        setState(() {
+          _wrongIconIndexes = {iconIdx};
+          _wrongWordIndexes = {wordIdx};
+          _tries++;
+        });
+        _tts.speak('다시 해보세요');
+        Future.delayed(const Duration(milliseconds: 900), () {
+          setState(() {
+            _selectedIconIndex = null;
+            _selectedWordIndex = null;
+            _wrongIconIndexes = {};
+            _wrongWordIndexes = {};
+            _isChecking = false;
+          });
         });
       });
-    });
+    }
   }
-}
 
   void _showResult() {
     showDialog(
       context: context,
       barrierDismissible: false,
       builder: (_) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(24)),
         title: const Text('🎉 모두 찾았어요!',
-            style: TextStyle(fontSize: 26), textAlign: TextAlign.center),
-        content: Text('시도 횟수: $_tries 번\n훌륭해요! 👏',
-            style: const TextStyle(fontSize: 22), textAlign: TextAlign.center),
+            style: TextStyle(fontSize: 26),
+            textAlign: TextAlign.center),
+        content: Text(
+          '시도 횟수: $_tries 번\n훌륭해요! 👏',
+          style: const TextStyle(fontSize: 22, height: 1.6),
+          textAlign: TextAlign.center,
+        ),
         actions: [
-          TextButton(
-            onPressed: () { Navigator.pop(context); _initGame(); },
-            child: const Text('다시 하기', style: TextStyle(fontSize: 22)),
-          ),
-          TextButton(
-            onPressed: () { Navigator.pop(context); Navigator.pop(context); },
-            child: const Text('끝내기', style: TextStyle(fontSize: 22)),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton(
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    textStyle: const TextStyle(fontSize: 20),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14)),
+                  ),
+                  onPressed: () {
+                    Navigator.pop(context);
+                    _initGame();
+                  },
+                  child: const Text('다시 하기'),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.deepPurple[300],
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    textStyle: const TextStyle(fontSize: 20),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14)),
+                  ),
+                  onPressed: () {
+                    Navigator.pop(context);
+                    Navigator.pop(context);
+                  },
+                  child: const Text('끝내기'),
+                ),
+              ),
+            ],
           ),
         ],
       ),
@@ -161,19 +186,24 @@ class _MatchingGameScreenState extends State<MatchingGameScreen> {
   @override
   Widget build(BuildContext context) {
     if (_isLoading) {
-      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+      return const Scaffold(
+          body: Center(child: CircularProgressIndicator()));
     }
 
     return Scaffold(
       backgroundColor: const Color(0xFFF5F0FF),
       appBar: AppBar(
         title: Text('🃏 짝 맞추기  ${_matchedIndexes.length} / 6 쌍',
-            style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+            style: const TextStyle(
+                fontSize: 20, fontWeight: FontWeight.bold)),
         backgroundColor: Colors.deepPurple[300],
         foregroundColor: Colors.white,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
-          onPressed: () { _tts.stop(); Navigator.pop(context); },
+          onPressed: () {
+            _tts.stop();
+            Navigator.pop(context);
+          },
         ),
         actions: [
           IconButton(
@@ -185,7 +215,7 @@ class _MatchingGameScreenState extends State<MatchingGameScreen> {
       ),
       body: Column(
         children: [
-          // 진행 바 상단 고정
+          // ── 진행 바 상단 고정 ──
           LinearProgressIndicator(
             value: _matchedIndexes.length / 6,
             minHeight: 10,
@@ -193,7 +223,7 @@ class _MatchingGameScreenState extends State<MatchingGameScreen> {
             color: Colors.deepPurple[300],
           ),
 
-          // 나머지 전체 스크롤
+          // ── 나머지 스크롤 ──
           Expanded(
             child: Scrollbar(
               thumbVisibility: true,
@@ -203,12 +233,12 @@ class _MatchingGameScreenState extends State<MatchingGameScreen> {
                 padding: const EdgeInsets.only(bottom: 20),
                 child: Column(
                   children: [
+
                     // ── 그림 구역 ──
                     _SectionLabel(
-                      icon: '🖼️',
-                      label: '그림 카드',
-                      color: Colors.orange[700]!,
-                    ),
+                        icon: '🖼️',
+                        label: '그림 카드',
+                        color: Colors.orange[700]!),
                     Padding(
                       padding: const EdgeInsets.symmetric(
                           horizontal: 12, vertical: 4),
@@ -233,16 +263,18 @@ class _MatchingGameScreenState extends State<MatchingGameScreen> {
                       ),
                     ),
 
-                    // 구분선
+                    // ── 구분선 ──
                     Padding(
                       padding: const EdgeInsets.symmetric(
                           horizontal: 16, vertical: 8),
                       child: Row(children: [
                         Expanded(
                             child: Divider(
-                                color: Colors.deepPurple[200], thickness: 1.5)),
+                                color: Colors.deepPurple[200],
+                                thickness: 1.5)),
                         Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 8),
+                          padding:
+                              const EdgeInsets.symmetric(horizontal: 8),
                           child: Text('👇 맞는 글자를 골라요',
                               style: TextStyle(
                                   fontSize: 16,
@@ -250,16 +282,16 @@ class _MatchingGameScreenState extends State<MatchingGameScreen> {
                         ),
                         Expanded(
                             child: Divider(
-                                color: Colors.deepPurple[200], thickness: 1.5)),
+                                color: Colors.deepPurple[200],
+                                thickness: 1.5)),
                       ]),
                     ),
 
                     // ── 글자 구역 ──
                     _SectionLabel(
-                      icon: '🔤',
-                      label: '글자 카드',
-                      color: Colors.deepPurple[600]!,
-                    ),
+                        icon: '🔤',
+                        label: '글자 카드',
+                        color: Colors.deepPurple[600]!),
                     Padding(
                       padding: const EdgeInsets.symmetric(
                           horizontal: 12, vertical: 4),
@@ -290,10 +322,10 @@ class _MatchingGameScreenState extends State<MatchingGameScreen> {
                 ),
               ),
             ),
-          ), // ← Expanded 닫기
+          ),
         ],
-      ), // ← Column 닫기
-    ); // ← Scaffold 닫기
+      ),
+    );
   }
 }
 
@@ -307,13 +339,15 @@ class _SectionLabel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 6, 16, 2),
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 2),
       child: Row(children: [
         Text(icon, style: const TextStyle(fontSize: 20)),
         const SizedBox(width: 6),
         Text(label,
             style: TextStyle(
-                fontSize: 18, fontWeight: FontWeight.bold, color: color)),
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+                color: color)),
       ]),
     );
   }
@@ -372,12 +406,11 @@ class _IconCard extends StatelessWidget {
             if (isMatched)
               const Text('✅', style: TextStyle(fontSize: 32))
             else
-              Text(word.icon, style: const TextStyle(fontSize: 44)),
+              Text(word.icon, style: const TextStyle(fontSize: 40)),
             if (isSelected && !isMatched)
               Container(
                 margin: const EdgeInsets.only(top: 4),
-                width: 8,
-                height: 8,
+                width: 8, height: 8,
                 decoration: const BoxDecoration(
                     color: Colors.orange, shape: BoxShape.circle),
               ),
@@ -445,21 +478,27 @@ class _WordCard extends StatelessWidget {
             if (isMatched)
               const Text('✅', style: TextStyle(fontSize: 28))
             else
-              Text(
-                word,
-                style: TextStyle(
-                    fontSize: 26,
-                    fontWeight: FontWeight.bold,
-                    color: textColor),
-                textAlign: TextAlign.center,
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4),
+                child: Text(
+                  word,
+                  style: TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.bold,
+                      color: textColor),
+                  textAlign: TextAlign.center,
+                  // ← 글씨 커져도 카드 안에서 자동 축소
+                  overflow: TextOverflow.ellipsis,
+                  maxLines: 1,
+                ),
               ),
             if (isSelected && !isMatched)
               Container(
                 margin: const EdgeInsets.only(top: 4),
-                width: 8,
-                height: 8,
+                width: 8, height: 8,
                 decoration: const BoxDecoration(
-                    color: Colors.deepPurple, shape: BoxShape.circle),
+                    color: Colors.deepPurple,
+                    shape: BoxShape.circle),
               ),
           ],
         ),
