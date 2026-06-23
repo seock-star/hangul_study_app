@@ -250,7 +250,7 @@ class _MatchingGameScreenState extends State<MatchingGameScreen> {
                           crossAxisCount: 3,
                           crossAxisSpacing: 10,
                           mainAxisSpacing: 10,
-                          childAspectRatio: 1.4,
+                          childAspectRatio: 1.1,
                         ),
                         itemCount: 6,
                         itemBuilder: (_, i) => _IconCard(
@@ -479,19 +479,18 @@ class _WordCard extends StatelessWidget {
               const Text('✅', style: TextStyle(fontSize: 28))
             else
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 4),
-                child: Text(
-                  word,
-                  style: TextStyle(
-                      fontSize: 22,
-                      fontWeight: FontWeight.bold,
-                      color: textColor),
-                  textAlign: TextAlign.center,
-                  // ← 글씨 커져도 카드 안에서 자동 축소
-                  overflow: TextOverflow.ellipsis,
-                  maxLines: 1,
-                ),
-              ),
+  padding: const EdgeInsets.symmetric(horizontal: 6),
+  child: Text(
+    word,
+    style: TextStyle(
+        fontSize: 20,
+        fontWeight: FontWeight.bold,
+        color: textColor),
+    textAlign: TextAlign.center,
+    maxLines: 2,              // ← 두 줄 허용
+    overflow: TextOverflow.visible, // ← 말줄임 제거
+  ),
+),
             if (isSelected && !isMatched)
               Container(
                 margin: const EdgeInsets.only(top: 4),

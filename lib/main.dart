@@ -3,16 +3,29 @@ import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'dart:math';
+import 'package:flutter_application_1/overlay_main.dart';
 import 'package:flutter_application_1/screens/forced_quiz_screen.dart';
 import 'package:flutter_application_1/screens/plant_screen.dart';
 import 'package:flutter_application_1/screens/study/study_menu_screen.dart';
 import 'package:flutter_application_1/screens/practice/practice_menu_screen.dart';
+import 'package:flutter_overlay_window/flutter_overlay_window.dart' as overlay;
 
 final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
     FlutterLocalNotificationsPlugin();
 
 final ValueNotifier<double> fontScaleNotifier = ValueNotifier<double>(1.0);
+
+// 방법 B: 알림 클릭 시 퀴즈 화면으로 이동하기 위한 전역 네비게이터 키
+final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
+
+// 오버레이 진입점 등록
+@pragma('vm:entry-point')
+void overlayMain() {
+  WidgetsFlutterBinding.ensureInitialized();
+  runApp(const OverlayQuizApp());
+}
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -24,8 +37,52 @@ void main() async {
       AndroidInitializationSettings('@mipmap/ic_launcher');
   const InitializationSettings initializationSettings =
       InitializationSettings(android: initializationSettingsAndroid);
+
   await flutterLocalNotificationsPlugin.initialize(
-      settings: initializationSettings);
+    settings: initializationSettings,
+    onDidReceiveNotificationResponse: (details) async {
+      // ✅ 방법 A: 오버레이 권한 있으면 오버레이로 띄우기
+      final hasPermission =
+          await overlay.FlutterOverlayWindow.isPermissionGranted();
+      if (hasPermission) {
+        await overlay.FlutterOverlayWindow.showOverlay(
+          enableDrag: false,
+          flag: overlay.OverlayFlag.defaultFlag,
+          height: overlay.WindowSize.fullCover,
+          width: overlay.WindowSize.matchParent,
+        );
+        return;
+      }
+
+      // ✅ 방법 B: 오버레이 권한 없으면 앱 열고 바로 퀴즈 화면으로!
+      final context = navigatorKey.currentContext;
+      if (context != null) {
+        final prefs = await SharedPreferences.getInstance();
+        final now = DateTime.now();
+        final lastQuizTime = prefs.getInt('lastQuizTime') ?? 0;
+        final lastQuizDateTime =
+            DateTime.fromMillisecondsSinceEpoch(lastQuizTime);
+        final hoursSinceLastQuiz =
+            now.difference(lastQuizDateTime).inHours;
+
+        // 4시간 이상 지났을 때만 퀴즈 강제 실행
+        if (hoursSinceLastQuiz >= 4) {
+          navigatorKey.currentState?.push(
+            MaterialPageRoute(
+              builder: (_) => ForcedQuizScreen(
+                onComplete: () async {
+                  await prefs.setInt(
+                    'lastQuizTime',
+                    DateTime.now().millisecondsSinceEpoch,
+                  );
+                },
+              ),
+            ),
+          );
+        }
+      }
+    },
+  );
 
   runApp(const HangulApp());
 }
@@ -40,7 +97,9 @@ class HangulApp extends StatelessWidget {
       builder: (_, scale, __) {
         return MaterialApp(
           debugShowCheckedModeBanner: false,
-          title: '기초 한글 공부',
+          title: '어르신 한글공부',
+          // ✅ 방법 B를 위한 navigatorKey 등록
+          navigatorKey: navigatorKey,
           theme: ThemeData(
             primarySwatch: Colors.green,
             textTheme: TextTheme(
@@ -89,21 +148,72 @@ class _HomeScreenState extends State<HomeScreen> {
     super.initState();
     _setKoreanVoice();
     _loadWordsFromFile();
-    _setupAlarms();
     _loadPlant();
     _updateDateTime();
     _timer = Stream.periodic(const Duration(seconds: 1))
         .listen((_) => _updateDateTime());
-         // 🌟 앱 켤 때 강제 퀴즈 체크 (4시간마다)
-  WidgetsBinding.instance.addPostFrameCallback((_) {
-    _checkForcedQuiz();
-  });
+
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      await _requestPermissions(); // 1. 권한 요청 먼저
+      _setupAlarms();              // 2. 알람 설정
+      _checkForcedQuiz();          // 3. 강제 퀴즈 체크
+    });
   }
 
   @override
   void dispose() {
     _timer.cancel();
     super.dispose();
+  }
+
+  // ✅ 최초 실행 시 권한 요청
+  Future<void> _requestPermissions() async {
+    // 알림 권한
+    final notifStatus = await Permission.notification.status;
+    if (!notifStatus.isGranted) {
+      await Permission.notification.request();
+    }
+
+    // 오버레이 권한 (설명 다이얼로그 먼저 보여주기)
+    final hasOverlay =
+        await overlay.FlutterOverlayWindow.isPermissionGranted();
+    if (!hasOverlay && mounted) {
+      await showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => AlertDialog(
+          shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(20)),
+          title: const Text('📚 공부 알림 설정',
+              style: TextStyle(fontSize: 22),
+              textAlign: TextAlign.center),
+          content: const Text(
+            '4시간마다 한글 공부 알림이 와요!\n\n'
+            '다음 화면에서\n"다른 앱 위에 표시" 를\n꼭 허용해 주세요 😊',
+            style: TextStyle(fontSize: 18, height: 1.6),
+            textAlign: TextAlign.center,
+          ),
+          actions: [
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.green,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14)),
+                ),
+                onPressed: () => Navigator.pop(context),
+                child: const Text('확인했어요!',
+                    style: TextStyle(fontSize: 20)),
+              ),
+            ),
+          ],
+        ),
+      );
+      await overlay.FlutterOverlayWindow.requestPermission();
+    }
   }
 
   void _loadPlant() async {
@@ -135,25 +245,43 @@ class _HomeScreenState extends State<HomeScreen> {
       _pickRandomWord();
     });
   }
-// 🌟 4시간마다 강제 퀴즈 체크
-Future<void> _checkForcedQuiz() async {
-  final prefs = await SharedPreferences.getInstance();
-  final now = DateTime.now();
-  final lastQuizTime = prefs.getInt('lastQuizTime') ?? 0;
-  final lastQuizDateTime =
-      DateTime.fromMillisecondsSinceEpoch(lastQuizTime);
-  final hoursSinceLastQuiz =
-      now.difference(lastQuizDateTime).inHours;
 
-  // 4시간 이상 지났으면 강제 퀴즈
-  if (hoursSinceLastQuiz >= 4) {
+  // ✅ 앱 열 때: 4시간 지났으면 강제 퀴즈 (방법 A 오버레이 or 방법 B 화면이동)
+  Future<void> _checkForcedQuiz() async {
+    final prefs = await SharedPreferences.getInstance();
+    final now = DateTime.now();
+    final lastQuizTime = prefs.getInt('lastQuizTime') ?? 0;
+    final lastQuizDateTime =
+        DateTime.fromMillisecondsSinceEpoch(lastQuizTime);
+    final hoursSinceLastQuiz =
+        now.difference(lastQuizDateTime).inHours;
+
+    if (hoursSinceLastQuiz < 4) return;
+
+    // 방법 A: 오버레이 권한 있으면 오버레이로
+    final hasPermission =
+        await overlay.FlutterOverlayWindow.isPermissionGranted();
+    if (hasPermission) {
+      await overlay.FlutterOverlayWindow.showOverlay(
+        enableDrag: false,
+        overlayTitle: '한글 공부 시간',
+        overlayContent: '문제를 풀어야 잠금이 해제돼요!',
+        flag: overlay.OverlayFlag.defaultFlag,
+        visibility: overlay.NotificationVisibility.visibilityPublic,
+        positionGravity: overlay.PositionGravity.auto,
+        height: overlay.WindowSize.fullCover,
+        width: overlay.WindowSize.matchParent,
+      );
+      return;
+    }
+
+    // 방법 B: 오버레이 권한 없으면 퀴즈 화면으로 이동
     if (mounted) {
       await Navigator.push(
         context,
         MaterialPageRoute(
           builder: (_) => ForcedQuizScreen(
             onComplete: () async {
-              // 퀴즈 완료 시간 저장
               await prefs.setInt(
                 'lastQuizTime',
                 DateTime.now().millisecondsSinceEpoch,
@@ -164,71 +292,72 @@ Future<void> _checkForcedQuiz() async {
       );
     }
   }
-}
+
   void _setupAlarms() async {
-  const AndroidNotificationDetails androidDetails =
-      AndroidNotificationDetails(
-    'study_alarm',
-    '한글 공부 알림',
-    importance: Importance.max,
-    priority: Priority.high,
-  );
-  const NotificationDetails platformDetails =
-      NotificationDetails(android: androidDetails);
+    const AndroidNotificationDetails androidDetails =
+        AndroidNotificationDetails(
+      'study_alarm',
+      '한글 공부 알림',
+      channelDescription: '한글 공부 시간 알림',
+      importance: Importance.max,
+      priority: Priority.high,
+      playSound: true,
+      enableVibration: true,
+      fullScreenIntent: true, // ✅ 화면 꺼져 있어도 알림 표시
+    );
+    const NotificationDetails platformDetails =
+        NotificationDetails(android: androidDetails);
 
-  // 기존 알람 전체 취소
-  await flutterLocalNotificationsPlugin.cancelAll();
+    await flutterLocalNotificationsPlugin.cancelAll();
 
-  // 2번: 점심 후 알람 (12:30)
-  await flutterLocalNotificationsPlugin.show(
-  id: 1,
-  title: '🍚 점심 드셨나요?',
-  body: '밥 먹고 한글 공부 5분만 해봐요! 오늘 미션이 기다려요 📚',
-  notificationDetails: platformDetails,
-);
-
-  // 2번: 저녁 후 알람 (18:30)
-  await flutterLocalNotificationsPlugin.show(
-  id: 2,
-  title: '🌙 저녁 드셨나요?',
-  body: '하루 마무리로 한글 공부 어떠세요? 오늘 스트릭을 지켜요! 🔥',
-  notificationDetails: platformDetails,
-);
-
-  // 3번: 스트릭 위기 알람 체크
-  _checkStreakAlarm(platformDetails);
-
-  // 4시간마다 반복 알람
-  await flutterLocalNotificationsPlugin.periodicallyShow(
-  id: 0,
-  title: '📚 한글 공부 시간이에요!',
-  body: '공부 안 하면 앱 열 때 퀴즈가 기다려요 😤',
-  repeatInterval: RepeatInterval.hourly,        // ← 이걸로 교체
-  notificationDetails: platformDetails,
-  androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
-);
-}
-
-// 3번: 스트릭 위기 알람
-void _checkStreakAlarm(NotificationDetails platformDetails) async {
-  final prefs = await SharedPreferences.getInstance();
-  final streak = prefs.getInt('streakDays') ?? 0;
-  if (streak < 2) return; // 스트릭 2일 미만이면 패스
-
-  final today = DateTime.now();
-  final todayKey = '${today.year}-${today.month}-${today.day}';
-  final lastStudyDate = prefs.getString('lastStudyDate') ?? '';
-
-  // 오늘 아직 공부 안 했으면 스트릭 위기 알람
-  if (lastStudyDate != todayKey) {
+    // 점심 후 알람 (12:30)
     await flutterLocalNotificationsPlugin.show(
-  id: 3,
-  title: '⚠️ 스트릭 위기! 🔥 $streak일이 끊겨요!',
-  body: '오늘 공부 안 하면 $streak일 연속 기록이 사라져요! 지금 바로 시작해요!',
-  notificationDetails: platformDetails,
-);
+      id: 1,
+      title: '🍚 점심 드셨나요?',
+      body: '밥 먹고 한글 공부 5분만 해봐요! 오늘 미션이 기다려요 📚',
+      notificationDetails: platformDetails,
+    );
+
+    // 저녁 후 알람 (18:30)
+    await flutterLocalNotificationsPlugin.show(
+      id: 2,
+      title: '🌙 저녁 드셨나요?',
+      body: '하루 마무리로 한글 공부 어떠세요? 오늘 스트릭을 지켜요! 🔥',
+      notificationDetails: platformDetails,
+    );
+
+    // 스트릭 위기 알람
+    _checkStreakAlarm(platformDetails);
+
+    // 매시간 반복 알람
+    await flutterLocalNotificationsPlugin.periodicallyShow(
+      id: 0,
+      title: '📚 한글 공부 시간이에요!',
+      body: '알림을 누르면 바로 퀴즈가 시작돼요! 🔥 스트릭을 지켜요!',
+      repeatInterval: RepeatInterval.hourly,
+      notificationDetails: platformDetails,
+      androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+    );
   }
-}
+
+  void _checkStreakAlarm(NotificationDetails platformDetails) async {
+    final prefs = await SharedPreferences.getInstance();
+    final streak = prefs.getInt('streakDays') ?? 0;
+    if (streak < 2) return;
+
+    final today = DateTime.now();
+    final todayKey = '${today.year}-${today.month}-${today.day}';
+    final lastStudyDate = prefs.getString('lastStudyDate') ?? '';
+
+    if (lastStudyDate != todayKey) {
+      await flutterLocalNotificationsPlugin.show(
+        id: 3,
+        title: '⚠️ 스트릭 위기! 🔥 $streak일이 끊겨요!',
+        body: '오늘 공부 안 하면 $streak일 연속 기록이 사라져요! 지금 바로 시작해요!',
+        notificationDetails: platformDetails,
+      );
+    }
+  }
 
   Future<void> _setKoreanVoice() async {
     await flutterTts.setLanguage("ko-KR");
@@ -252,7 +381,7 @@ void _checkStreakAlarm(NotificationDetails platformDetails) async {
     return Scaffold(
       backgroundColor: Colors.green[50],
       appBar: AppBar(
-        title: const Text('기초 한글 공부',
+        title: const Text('어르신 한글공부',
             style: TextStyle(fontSize: 26, fontWeight: FontWeight.bold)),
         backgroundColor: Colors.green[500],
         foregroundColor: Colors.white,
@@ -289,156 +418,157 @@ void _checkStreakAlarm(NotificationDetails platformDetails) async {
               ),
 
               // ── 날짜/시간 카드 ──
-              // ── 날짜/시간 카드 ──
-Card(
-  elevation: 6,
-  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-  child: Container(
-    decoration: BoxDecoration(
-      borderRadius: BorderRadius.circular(24),
-      gradient: LinearGradient(
-        colors: [Colors.green[400]!, Colors.teal[400]!],
-        begin: Alignment.topLeft,
-        end: Alignment.bottomRight,
-      ),
-      boxShadow: [
-        BoxShadow(
-          color: Colors.green.withOpacity(0.4),
-          blurRadius: 12,
-          offset: const Offset(0, 4),
-        ),
-      ],
-    ),
-    padding: const EdgeInsets.symmetric(vertical: 18, horizontal: 20),
-    child: Row(
-      mainAxisAlignment: MainAxisAlignment.center,
-      crossAxisAlignment: CrossAxisAlignment.center,
-      children: [
-        Container(
-          padding: const EdgeInsets.all(10),
-          decoration: BoxDecoration(
-            color: Colors.white.withOpacity(0.25),
-            shape: BoxShape.circle,
-          ),
-          child: const Icon(Icons.calendar_today,
-              color: Colors.white, size: 30),
-        ),
-        const SizedBox(width: 16),
-        // ← Flexible로 감싸서 글씨 커져도 박스 안에서 처리
-        Flexible(
-          child: Text(
-            _currentDateTime,
-            textAlign: TextAlign.center,
-            style: const TextStyle(
-              fontSize: 20,
-              fontWeight: FontWeight.bold,
-              color: Colors.white,
-              height: 1.7,
-              shadows: [
-                Shadow(
-                  color: Colors.black26,
-                  offset: Offset(1, 1),
-                  blurRadius: 3,
-                ),
-              ],
-            ),
-          ),
-        ),
-      ],
-    ),
-  ),
-),
-const SizedBox(height: 12),
-
-             // ── 오늘의 단어 카드 ──
-Card(
-  elevation: 6,
-  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-  child: Container(
-    decoration: BoxDecoration(
-      borderRadius: BorderRadius.circular(24),
-      gradient: LinearGradient(
-        colors: [Colors.blue[300]!, Colors.indigo[300]!],
-        begin: Alignment.topLeft,
-        end: Alignment.bottomRight,
-      ),
-      boxShadow: [
-        BoxShadow(
-          color: Colors.blue.withOpacity(0.3),
-          blurRadius: 12,
-          offset: const Offset(0, 4),
-        ),
-      ],
-    ),
-    padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 20),
-    child: Row(
-      mainAxisAlignment: MainAxisAlignment.center,
-      crossAxisAlignment: CrossAxisAlignment.center,
-      children: [
-        Container(
-          padding: const EdgeInsets.all(8),
-          decoration: BoxDecoration(
-            color: Colors.white.withOpacity(0.25),
-            shape: BoxShape.circle,
-          ),
-          child: const Text('💡', style: TextStyle(fontSize: 24)),
-        ),
-        const SizedBox(width: 12),
-        // ← Flexible로 감싸서 글씨 커져도 줄바꿈으로 처리
-        Flexible(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                '오늘의 단어',
-                style: TextStyle(
-                  fontSize: 14,
-                  color: Colors.white70,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-              const SizedBox(height: 2),
-              Text(
-                todayWord,
-                style: const TextStyle(
-                  fontSize: 28,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.white,
-                  shadows: [
-                    Shadow(
-                      color: Colors.black26,
-                      offset: Offset(1, 1),
-                      blurRadius: 3,
+              Card(
+                elevation: 6,
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(24)),
+                child: Container(
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(24),
+                    gradient: LinearGradient(
+                      colors: [Colors.green[400]!, Colors.teal[400]!],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
                     ),
-                  ],
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.green.withOpacity(0.4),
+                        blurRadius: 12,
+                        offset: const Offset(0, 4),
+                      ),
+                    ],
+                  ),
+                  padding: const EdgeInsets.symmetric(
+                      vertical: 18, horizontal: 20),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withOpacity(0.25),
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(Icons.calendar_today,
+                            color: Colors.white, size: 30),
+                      ),
+                      const SizedBox(width: 16),
+                      Flexible(
+                        child: Text(
+                          _currentDateTime,
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.white,
+                            height: 1.7,
+                            shadows: [
+                              Shadow(
+                                color: Colors.black26,
+                                offset: Offset(1, 1),
+                                blurRadius: 3,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
-            ],
-          ),
-        ),
-        const SizedBox(width: 8),
-        // 버튼 두 개
-        Column(
-          children: [
-            IconButton(
-              icon: const Icon(Icons.volume_up,
-                  size: 28, color: Colors.white),
-              onPressed: () => flutterTts.speak(todayWord),
-              tooltip: '소리 듣기',
-            ),
-            IconButton(
-              icon: const Icon(Icons.refresh,
-                  size: 24, color: Colors.white70),
-              onPressed: _pickRandomWord,
-              tooltip: '다른 단어',
-            ),
-          ],
-        ),
-      ],
-    ),
-  ),
-),
-const SizedBox(height: 20),
+              const SizedBox(height: 12),
+
+              // ── 오늘의 단어 카드 ──
+              Card(
+                elevation: 6,
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(24)),
+                child: Container(
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(24),
+                    gradient: LinearGradient(
+                      colors: [Colors.blue[300]!, Colors.indigo[300]!],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.blue.withOpacity(0.3),
+                        blurRadius: 12,
+                        offset: const Offset(0, 4),
+                      ),
+                    ],
+                  ),
+                  padding: const EdgeInsets.symmetric(
+                      vertical: 16, horizontal: 20),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withOpacity(0.25),
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Text('💡',
+                            style: TextStyle(fontSize: 24)),
+                      ),
+                      const SizedBox(width: 12),
+                      Flexible(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              '오늘의 단어',
+                              style: TextStyle(
+                                fontSize: 14,
+                                color: Colors.white70,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              todayWord,
+                              style: const TextStyle(
+                                fontSize: 28,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.white,
+                                shadows: [
+                                  Shadow(
+                                    color: Colors.black26,
+                                    offset: Offset(1, 1),
+                                    blurRadius: 3,
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Column(
+                        children: [
+                          IconButton(
+                            icon: const Icon(Icons.volume_up,
+                                size: 28, color: Colors.white),
+                            onPressed: () => flutterTts.speak(todayWord),
+                            tooltip: '소리 듣기',
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.refresh,
+                                size: 24, color: Colors.white70),
+                            onPressed: _pickRandomWord,
+                            tooltip: '다른 단어',
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 20),
 
               // ── 메인 3대 메뉴 ──
               _MainMenuButton(
@@ -516,16 +646,19 @@ class _FontSettingPanel extends StatelessWidget {
     return Card(
       color: Colors.amber[50],
       elevation: 3,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      shape:
+          RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       margin: const EdgeInsets.only(bottom: 16),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+        padding:
+            const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
               children: [
-                const Icon(Icons.text_fields, color: Colors.amber, size: 26),
+                const Icon(Icons.text_fields,
+                    color: Colors.amber, size: 26),
                 const SizedBox(width: 8),
                 const Text('글씨 크기 조절',
                     style: TextStyle(
@@ -610,18 +743,22 @@ class _QuickScaleButton extends StatelessWidget {
     return GestureDetector(
       onTap: () => onTap(scale),
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        padding:
+            const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
         decoration: BoxDecoration(
           color: isSelected ? Colors.amber[700] : Colors.white,
           borderRadius: BorderRadius.circular(12),
           border: Border.all(
-              color: isSelected ? Colors.amber[700]! : Colors.grey[300]!),
+              color: isSelected
+                  ? Colors.amber[700]!
+                  : Colors.grey[300]!),
         ),
         child: Text(label,
             style: TextStyle(
                 fontSize: 14,
                 fontWeight: FontWeight.bold,
-                color: isSelected ? Colors.white : Colors.black87)),
+                color:
+                    isSelected ? Colors.white : Colors.black87)),
       ),
     );
   }
@@ -664,7 +801,6 @@ class _MainMenuButton extends StatelessWidget {
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // 왼쪽 컬러 영역
               Container(
                 width: 100,
                 constraints: const BoxConstraints(minHeight: 100),
@@ -679,7 +815,6 @@ class _MainMenuButton extends StatelessWidget {
                     style: const TextStyle(fontSize: 52)),
               ),
               const SizedBox(width: 22),
-              // 오른쪽 텍스트 영역
               Expanded(
                 child: Padding(
                   padding: const EdgeInsets.symmetric(vertical: 18),
@@ -695,7 +830,8 @@ class _MainMenuButton extends StatelessWidget {
                       const SizedBox(height: 6),
                       Text(subLabel,
                           style: const TextStyle(
-                              fontSize: 18, color: Colors.black54)),
+                              fontSize: 18,
+                              color: Colors.black54)),
                     ],
                   ),
                 ),
